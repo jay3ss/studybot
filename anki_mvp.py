@@ -3,23 +3,22 @@ import logging
 from typing import List
 
 import genanki
+import ollama
 import weaviate
-from dotenv import load_dotenv
 from langchain.globals import set_debug
 from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from langchain_openai.chat_models import ChatOpenAI
-from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain_ollama import ChatOllama, OllamaEmbeddings, OllamaLLM
 from langchain_weaviate.vectorstores import WeaviateVectorStore
 from langsmith import traceable
 from pydantic import BaseModel, Field
-from text.utils import gen_rand_id
+from text.utils import gen_rand_id, get_deck_id
+from weaviate.classes.query import Filter, Sort
 
 from settings import settings
 
-load_dotenv()
 set_debug(True)
 
 
@@ -35,10 +34,7 @@ logging.basicConfig(
 
 system = """You are an assistant that generates multiple-choice questions for educational
 purposes. Given the following chunk of text, create **{num_questions} multiple-choice questions** that test
-the reader's understanding of the content. You shall retrieve the data from the database in
-order to get the text to generate the cards from. Use the WeaviateQueryTool tool to query
-the database. Ensure that when calling the tool, you use the `subject` as the argument to
-the WeaviateQueryTool tool.
+the reader's understanding of the content.
 
 For each question:
 1. Provide one correct answer.
@@ -57,6 +53,7 @@ Requirements:
   - Application of ideas or techniques
   - Critical thinking and analysis
 - Use precise language and avoid repetition in question structure.
+- Don't write this as code, it's not. Just write the questions in the given format
 
 Guidelines:
 1. Avoid mentioning the text, subject, or example explicitly in the question.
@@ -98,8 +95,6 @@ Make sure the questions are varied in scope and difficulty, and use graduate-lev
 and use the given context and subject to generate the questions.
 
 Context: {context}
-
-Subject: {subject}
 """
 
 
@@ -140,12 +135,12 @@ class AnkiDeck(BaseModel):
     deck: List[AnkiCard] = Field(description="A deck of Anki cards")
 
 
-openai_embeddings = OpenAIEmbeddings(api_key=settings.openai_api_key)
+ollama_embeddings = OllamaEmbeddings(model=settings.embeddings_model)
 
 
 # Define a function to get embeddings from OpenAI using LangChain's OpenAIEmbeddings
-def vectorize_openai(text: str) -> List[float]:
-    return openai_embeddings.embed_documents(text)[0]
+def vectorize(text: str) -> List[float]:
+    return ollama_embeddings.embed_documents(text)[0]
 
 
 # class WeaviateQueryTool:
@@ -230,11 +225,14 @@ def create_anki_note(card: AnkiCard, model: genanki.Model = mcq_model) -> genank
 
 @traceable
 def generate_responses(
-    subject: str, num_questions: int = 20, model: str = "gpt-4"
+    subject: str, num_questions: int = 20, model: str = "deepseek-r1:14b"
 ) -> List[dict]:
     """Generates questions and answers for the given subject."""
-    system_prompt = system.replace("{num_questions}", str(num_questions))
-    llm = ChatOpenAI(model=model, api_key=settings.openai_api_key, verbose=True)
+    # system_prompt = system.replace("{num_questions}", str(num_questions))
+    llm = ChatOllama(model=model, verbose=True, temperature=0.1, num_ctx=32768)
+    structured_llm = llm.with_structured_output(AnkiDeck, method="json_schema")
+    # llm = OllamaLLM(model=model, verbose=True, temperature=0.1)
+    # llm = ollama.chat(model=model, format="json")
     # llm = OpenAI(
     #     model=model,
     #     api_key=settings.openai_api_key,
@@ -243,47 +241,80 @@ def generate_responses(
     # )
     # llm.bind_tools([WeaviateQueryTool.run])
 
-    prompt = ChatPromptTemplate.from_messages(
-        [("system", system_prompt), ("human", "{subject}")]
-    )
-    parser = PydanticOutputParser(pydantic_object=List[AnkiCard])
+    # prompt = ChatPromptTemplate.from_messages([("system", system_prompt)])
+    prompt = ChatPromptTemplate.from_messages([("system", system)])
+    # parser = PydanticOutputParser(pydantic_object=List[AnkiCard])
     # chain = prompt | agent
-    with weaviate.connect_to_local(
-        headers={"X-OpenAI-Api-Key": settings.openai_api_key}
-    ) as client:
+    with weaviate.connect_to_local() as client:
         # vectorstore = Weaviate(
         #     client=client,
-        #     embedding_function=openai_embeddings.embed_query
+        #     embedding_function=ollama_embeddings.embed_query
         #     index_name="your_index",  # Replace with your Weaviate index name
         #     text_key="text",  # Adjust based on your schema
         # )
-        db = WeaviateVectorStore(
-            client=client,
-            index_name="DocumentChunk",
-            text_key="text",
-            embedding=openai_embeddings,
-        )
-        retriever = db.as_retriever(search_type="similarity")
+        # db = WeaviateVectorStore(
+        #     client=client,
+        #     index_name="DocumentChunk",
+        #     text_key="text",
+        #     embedding=settings.embeddings_model,
+        # )
+        # retriever = db.as_retriever(search_type="similarity", search_kwargs={"source": subject})
+        collection = client.collections.get("DocumentChunk")
+        # source_filter = Filter.by_property("source").equal(subject)
+
+        def retriever(source):
+            return collection.query.fetch_objects(
+                filters=Filter.by_property("source").equal(source),
+                sort=Sort.by_property(name="index", ascending=True),
+            )
+
+        def prepare_prompt_input(inputs):
+            chunks = retriever(inputs["source"])
+            context = "".join(
+                [chunk.properties.get("text", "") for chunk in chunks.objects]
+            )
+            return {
+                # "context": "\n".join(
+                #     [o.get("text", "") for o in retriever(inputs["source"])]
+                # ),
+                "context": context,
+                "num_questions": num_questions,
+            }
+
         # chain = RetrievalQAWithSourcesChain.from_chain_type(
         #     llm, chain_type="stuff", retriever=retriever
         # )
         # responses = chain.invoke({"subject": subject})
-        rag_chain = (
-            {"context": retriever, "subject": RunnablePassthrough()}
-            | prompt
-            | llm
-            | JsonOutputParser()
+        # rag_chain = (
+        #     {"context": retriever, "subject": RunnablePassthrough()}
+        #     | prompt
+        #     | llm
+        #     | JsonOutputParser()
+        # )
+        # rag_chain = retriever | prompt | llm | JsonOutputParser()
+        # responses = rag_chain.invoke(subject)
+        # rag_chain = prepare_prompt_input | prompt | llm
+        # responses = rag_chain.invoke(
+        #     {"source": subject, "num_questions": num_questions}
+        # )
+        prepared = prepare_prompt_input(
+            {"source": subject, "num_questions": num_questions}
         )
-        responses = rag_chain.invoke(subject)
+        rendered_prompt = prompt.invoke(prepared)
+    responses = structured_llm.invoke(rendered_prompt)
     return responses
 
 
 # Save to Anki Format
-def save_to_anki_format(cards: List[dict], output_file: str, deckname: str):
+def save_to_anki_format(cards: AnkiDeck, output_file: str, deckname: str):
     """Saves questions and answers in Anki's importable TSV format."""
-    deck = genanki.Deck(deck_id=gen_rand_id(), name=deckname)
-    for card in cards:
-        deck.add_note(create_anki_note(AnkiCard(**card), model=mcq_model))
+    deck = genanki.Deck(deck_id=get_deck_id(deckname), name=deckname)
+    for card in cards.deck:
+        deck.add_note(
+            genanki.Note(
+                model=mcq_model, fields=[card.question] + card.options + [card.answer]
+            )
+        )
 
     genanki.Package(deck).write_to_file(output_file)
 
@@ -324,8 +355,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="gpt-4",
-        help="Name of the LLM model to use (default: gpt-4).",
+        default="deepseek-r1:14b",
+        help="Name of the LLM model to use (default: deepseek-r1:14b).",
     )
 
     args = parser.parse_args()

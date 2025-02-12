@@ -171,7 +171,7 @@ class EnhancedPDFLoader(PyPDFLoader):
                 return {
                     "author": info.get("/Author", None),
                     "publish_date": info.get("/CreationDate", None),
-                    "source": info.get("/Title", None),
+                    "source": file_path,
                 }
         except Exception as e:
             print(f"Failed to extract metadata from {file_path}: {e}")
