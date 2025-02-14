@@ -140,37 +140,28 @@ def store_chunks(chunks: list[dict]) -> None:
 
 # Main MVP Function
 def main():
-    # parser = argparse.ArgumentParser(
-    #     description="Add text to the databse for generating Anki cards from text documents."
-    # )
+    parser = argparse.ArgumentParser(
+        description="Add text to the databse for generating Anki cards from text documents."
+    )
 
-    # parser.add_argument("-i", "--input", help="Path to the input text file(s).")
+    parser.add_argument("-i", "--input", help="Path to the input text file(s).")
 
-    # parser.add_argument(
-    #     "-d",
-    #     "--debug",
-    #     default=False,
-    #     help="Show logging statements",
-    # )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        default=False,
+        help="Show logging statements",
+    )
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    # logging.info("Loading documents...")
-    # documents = load_documents(args.input)
-    doc_paths = [
-        "P1L2 Text Browser Exercise (Analysis) Subtitles",
-        "P1L3 Design Concepts Subtitles",
-        "P2L1 Review of UML Subtitles",
-        "SWEBOKv3_chapter2.pdf",
-    ]
-    for doc_path in doc_paths:
-        logging.info(f"Loading {doc_path}")
-        documents = load_documents(f"documents/{doc_path}")
-        logging.info("Chunking text...")
-        chunks = chunk_text(documents)
-        logging.info("Storing chunks...")
-        store_chunks(chunks)
-        logging.info("Done!")
+    logging.info("Loading documents...")
+    documents = load_documents(args.input)
+    logging.info("Chunking text...")
+    chunks = chunk_text(documents)
+    logging.info("Storing chunks...")
+    store_chunks(chunks)
+    logging.info("Done!")
     client.close()
 
 
