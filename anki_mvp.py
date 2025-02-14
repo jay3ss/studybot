@@ -3,15 +3,10 @@ import logging
 from typing import List
 
 import genanki
-import ollama
 import weaviate
 from langchain.globals import set_debug
-from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from langchain_ollama import ChatOllama, OllamaEmbeddings, OllamaLLM
-from langchain_weaviate.vectorstores import WeaviateVectorStore
+from langchain_ollama import ChatOllama
 from langsmith import traceable
 from pydantic import BaseModel, Field
 from text.utils import gen_rand_id, get_deck_id
