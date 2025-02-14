@@ -130,55 +130,6 @@ class AnkiDeck(BaseModel):
     deck: List[AnkiCard] = Field(description="A deck of Anki cards")
 
 
-ollama_embeddings = OllamaEmbeddings(model=settings.embeddings_model)
-
-
-# Define a function to get embeddings from OpenAI using LangChain's OpenAIEmbeddings
-def vectorize(text: str) -> List[float]:
-    return ollama_embeddings.embed_documents(text)[0]
-
-
-# class WeaviateQueryTool:
-#     @tool(parse_docstring=True)
-#     def run(self, subject: str):
-#         """
-#         Retrieves relevant text from the Weaviate database by performing a hybrid search using
-#         both BM25 (traditional keyword search) and vector-based search. The method leverages
-#         OpenAI's Embedding API for vectorization of the subject, and queries Weaviate's "DocumentChunk"
-#         collection for the most relevant documents.
-
-#         Args:
-#             subject (str): The query string or subject for which to retrieve relevant information from Weaviate.
-
-#         Returns:
-#             List[dict]: A list of documents (or document chunks) that match the hybrid search query,
-#                         including metadata like the relevance score.
-
-#         Raises:
-#             ConnectionError: If there's an issue connecting to the Weaviate instance.
-#             QueryExecutionError: If the query execution fails.
-
-#         Example:
-#             response = WeaviateQueryTool.run("Python programming")
-#             print(response)
-
-#         This method performs a hybrid query that combines the BM25 traditional keyword search and
-#         the vector search using embeddings to retrieve the most relevant documents stored in Weaviate's
-#         "DocumentChunk" collection. The results include metadata such as relevance scores to help rank
-#         the returned documents based on their relevance to the subject.
-#         """
-#         print("In the WeaviateQueryTool.run method")
-#         logging.info(f"Calling WeaviateQueryTool with args: {subject}")
-#         with weaviate.connect_to_local(
-#             headers={"X-OpenAI-Api-Key": settings.openai_api_key}
-#         ) as client:  # Or use your Weaviate instance
-#             # Get the collection (ensure you have the correct collection name)
-#             db = Weaviate(client, index_name="DocumentChunk", text_key="text")
-#             retriever = db.as_retriever(search_type="mmr")
-
-#         return response.objects
-
-
 def create_anki_note(card: AnkiCard, model: genanki.Model = mcq_model) -> genanki.Note:
     return genanki.Note(
         model=model,
@@ -190,72 +141,17 @@ def create_anki_note(card: AnkiCard, model: genanki.Model = mcq_model) -> genank
     )
 
 
-# def create_agent(model: str = "gpt-4"):
-#     llm = ChatOpenAI(
-#         model=model,
-#         api_key=settings.openai_api_key,
-#         verbose=True,
-#         # temperature=0,
-#     )
-#     tools = [
-#         Tool(
-#             name="WeaviateQueryTool",
-#             func=WeaviateQueryTool().run,
-#             description=(
-#                 "Query Weaviate to retrieve the relevant "
-#                 "document chunks for a specific subject and keywords. "
-#                 "The tool is called in the following manner: "
-#                 "`WeaviateQueryTool.run(subject)` "
-#                 "where `subject` is the user given subject"
-#             ),
-#         )
-#     ]
-#     return initialize_agent(
-#         tools=tools,
-#         agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-#         llm=llm,
-#         verbose=True,
-#     )
-
-
 @traceable
 def generate_responses(
     subject: str, num_questions: int = 20, model: str = "deepseek-r1:14b"
 ) -> List[dict]:
     """Generates questions and answers for the given subject."""
-    # system_prompt = system.replace("{num_questions}", str(num_questions))
     llm = ChatOllama(model=model, verbose=True, temperature=0.1, num_ctx=32768)
     structured_llm = llm.with_structured_output(AnkiDeck, method="json_schema")
-    # llm = OllamaLLM(model=model, verbose=True, temperature=0.1)
-    # llm = ollama.chat(model=model, format="json")
-    # llm = OpenAI(
-    #     model=model,
-    #     api_key=settings.openai_api_key,
-    #     verbose=True,
-    #     temperature=0,
-    # )
-    # llm.bind_tools([WeaviateQueryTool.run])
 
-    # prompt = ChatPromptTemplate.from_messages([("system", system_prompt)])
     prompt = ChatPromptTemplate.from_messages([("system", system)])
-    # parser = PydanticOutputParser(pydantic_object=List[AnkiCard])
-    # chain = prompt | agent
     with weaviate.connect_to_local() as client:
-        # vectorstore = Weaviate(
-        #     client=client,
-        #     embedding_function=ollama_embeddings.embed_query
-        #     index_name="your_index",  # Replace with your Weaviate index name
-        #     text_key="text",  # Adjust based on your schema
-        # )
-        # db = WeaviateVectorStore(
-        #     client=client,
-        #     index_name="DocumentChunk",
-        #     text_key="text",
-        #     embedding=settings.embeddings_model,
-        # )
-        # retriever = db.as_retriever(search_type="similarity", search_kwargs={"source": subject})
         collection = client.collections.get("DocumentChunk")
-        # source_filter = Filter.by_property("source").equal(subject)
 
         def retriever(source):
             return collection.query.fetch_objects(
@@ -269,29 +165,10 @@ def generate_responses(
                 [chunk.properties.get("text", "") for chunk in chunks.objects]
             )
             return {
-                # "context": "\n".join(
-                #     [o.get("text", "") for o in retriever(inputs["source"])]
-                # ),
                 "context": context,
                 "num_questions": num_questions,
             }
 
-        # chain = RetrievalQAWithSourcesChain.from_chain_type(
-        #     llm, chain_type="stuff", retriever=retriever
-        # )
-        # responses = chain.invoke({"subject": subject})
-        # rag_chain = (
-        #     {"context": retriever, "subject": RunnablePassthrough()}
-        #     | prompt
-        #     | llm
-        #     | JsonOutputParser()
-        # )
-        # rag_chain = retriever | prompt | llm | JsonOutputParser()
-        # responses = rag_chain.invoke(subject)
-        # rag_chain = prepare_prompt_input | prompt | llm
-        # responses = rag_chain.invoke(
-        #     {"source": subject, "num_questions": num_questions}
-        # )
         prepared = prepare_prompt_input(
             {"source": subject, "num_questions": num_questions}
         )
@@ -300,7 +177,6 @@ def generate_responses(
     return responses
 
 
-# Save to Anki Format
 def save_to_anki_format(cards: AnkiDeck, output_file: str, deckname: str):
     """Saves questions and answers in Anki's importable TSV format."""
     deck = genanki.Deck(deck_id=get_deck_id(deckname), name=deckname)
@@ -314,7 +190,6 @@ def save_to_anki_format(cards: AnkiDeck, output_file: str, deckname: str):
     genanki.Package(deck).write_to_file(output_file)
 
 
-# Main MVP Function
 def main():
     parser = argparse.ArgumentParser(
         description="Generate Anki cards from text documents."
@@ -365,6 +240,5 @@ def main():
     logging.info(f"Anki deck saved to {args.output_file}!")
 
 
-# Example Usage
 if __name__ == "__main__":
     main()
