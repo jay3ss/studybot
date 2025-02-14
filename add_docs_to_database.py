@@ -71,7 +71,6 @@ if not client.collections.exists("DocumentChunk"):
     )
 
 
-# Load Documents
 def load_documents(file_path: str) -> Generator[Document, None, None] | list:
     """Loads documents from a given file path."""
     if os.path.isdir(file_path):
@@ -81,7 +80,6 @@ def load_documents(file_path: str) -> Generator[Document, None, None] | list:
     return docs
 
 
-# Chunk Text
 def chunk_text(documents: Generator[Document, None, None] | list) -> List[str]:
     """Chunks documents into smaller parts."""
     splitter = SemanticChunker(OllamaEmbeddings(model=settings.embeddings_model))
@@ -116,7 +114,6 @@ def convert_index_to_int(index: str) -> int:
     return index
 
 
-# Store chunks in database
 def store_chunks(chunks: list[dict]) -> None:
     document_chunk = client.collections.get("DocumentChunk")
     with document_chunk.batch.dynamic() as batch:
@@ -126,7 +123,6 @@ def store_chunks(chunks: list[dict]) -> None:
                 **ingest_document_metadata(chunk["metadata"]),
                 "index": chunk["index"],
             }
-            # doc_chunk_obj.update(ingest_document_metadata(chunk["metadata"]))
             response = ollama.embeddings(
                 model=settings.embeddings_model, prompt=chunk["text"]
             )
@@ -138,7 +134,6 @@ def store_chunks(chunks: list[dict]) -> None:
         )
 
 
-# Main MVP Function
 def main():
     parser = argparse.ArgumentParser(
         description="Add text to the databse for generating Anki cards from text documents."
@@ -165,6 +160,5 @@ def main():
     client.close()
 
 
-# Example Usage
 if __name__ == "__main__":
     main()
