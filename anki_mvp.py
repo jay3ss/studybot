@@ -143,7 +143,7 @@ def create_anki_note(card: AnkiCard, model: genanki.Model = mcq_model) -> genank
 
 @traceable
 def generate_responses(
-    subject: str, num_questions: int = 20, model: str = "deepseek-r1:14b"
+    subject: str, num_questions: int = 20, model: str = settings.inference_model
 ) -> List[dict]:
     """Generates questions and answers for the given subject."""
     llm = ChatOllama(model=model, verbose=True, temperature=0.1, num_ctx=32768)
@@ -225,8 +225,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="deepseek-r1:14b",
-        help="Name of the LLM model to use (default: deepseek-r1:14b).",
+        default=settings.inference_model,
+        help=f"Name of the LLM model to use (default: {settings.inference_model}).",
     )
 
     args = parser.parse_args()
